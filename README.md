@@ -39,9 +39,17 @@ permanently either:
 | "Incorrect" banner | Deletes the entry, so wrong answers are never kept. |
 | Bookwork check | Reads the code from the blue `Bookwork 1C` button, finds the logged answer, outlines the matching option (green = exact match, amber = partial) and shows a banner at the top with the answer text so you can compare by eye if the highlight fails. |
 
+### Wait timer
+
+A countdown pinned to the top of the page starts when a question is opened
+(default 60 seconds, configurable in the popup). Clicking "Submit answer" or
+pressing Enter before it reaches zero is blocked with a "Hold up" message.
+The message has a **Veto** button that submits anyway for that question.
+Revisiting a question does not restart its clock.
+
 Everything is stored locally in the browser (`browser.storage.local`); nothing
 is sent anywhere. The toolbar popup shows the log, lets you export it as JSON,
-delete entries or clear it, and toggles the on-page status bar.
+delete entries or clear it, toggles the on-page status bar, and sets the wait timer.
 
 ## How answers are read
 

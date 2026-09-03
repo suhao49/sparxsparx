@@ -22,8 +22,10 @@ function say(text, isError) {
 async function render() {
   const res = await browser.storage.local.get([STORAGE_KEY, SETTINGS_KEY]);
   const log = Array.isArray(res[STORAGE_KEY]) ? res[STORAGE_KEY] : [];
-  const settings = Object.assign({ overlay: true }, res[SETTINGS_KEY] || {});
+  const settings = Object.assign({ overlay: true, timerEnabled: true, timerSeconds: 60 }, res[SETTINGS_KEY] || {});
   $('overlay').checked = !!settings.overlay;
+  $('timerEnabled').checked = !!settings.timerEnabled;
+  $('timerSeconds').value = settings.timerSeconds;
   $('count').textContent = `${log.length} entr${log.length === 1 ? 'y' : 'ies'}`;
 
   const rows = $('rows');
@@ -129,11 +131,17 @@ $('saveHtml').addEventListener('click', async () => {
   } catch (e) { say('Save failed: ' + e.message, true); }
 });
 
-$('overlay').addEventListener('change', async ev => {
+async function updateSettings(patch) {
   const res = await browser.storage.local.get(SETTINGS_KEY);
-  const settings = Object.assign({ overlay: true }, res[SETTINGS_KEY] || {});
-  settings.overlay = ev.target.checked;
+  const settings = Object.assign({ overlay: true, timerEnabled: true, timerSeconds: 60 }, res[SETTINGS_KEY] || {}, patch);
   await browser.storage.local.set({ [SETTINGS_KEY]: settings });
+}
+$('overlay').addEventListener('change', ev => updateSettings({ overlay: ev.target.checked }));
+$('timerEnabled').addEventListener('change', ev => updateSettings({ timerEnabled: ev.target.checked }));
+$('timerSeconds').addEventListener('change', ev => {
+  const n = Math.max(0, Math.min(3600, parseInt(ev.target.value, 10) || 0));
+  ev.target.value = n;
+  updateSettings({ timerSeconds: n });
 });
 
 browser.storage.onChanged.addListener(changes => { if (changes[STORAGE_KEY]) render(); });

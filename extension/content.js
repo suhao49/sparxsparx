@@ -65,7 +65,11 @@
 
   // ------------------------------------------------------------------ state
   let log = [];                 // persisted entries (see makeEntry)
-  let settings = { overlay: true };
+  const DEFAULT_SETTINGS = { overlay: true, timerEnabled: true, timerSeconds: 60 };
+  let settings = Object.assign({}, DEFAULT_SETTINGS);
+  const questionStart = new Map();   // code -> timestamp the question was first seen
+  const vetoed = new Set();          // codes where the wait was bypassed
+  let pendingSubmitBtn = null;       // button whose click was blocked by the timer
   let currentCode = null;       // code of the question currently open
   let draft = null;             // { code, question, answer } being built
   let pendingId = null;         // entry created on "Submit answer", awaiting result
@@ -211,7 +215,7 @@
   function load() {
     return browser.storage.local.get([STORAGE_KEY, SETTINGS_KEY]).then(res => {
       log = Array.isArray(res[STORAGE_KEY]) ? res[STORAGE_KEY] : [];
-      settings = Object.assign({ overlay: true }, res[SETTINGS_KEY] || {});
+      settings = Object.assign({}, DEFAULT_SETTINGS, res[SETTINGS_KEY] || {});
     }).catch(() => {});
   }
   function save() {
@@ -227,8 +231,9 @@
       log = Array.isArray(changes[STORAGE_KEY].newValue) ? changes[STORAGE_KEY].newValue : [];
     }
     if (changes[SETTINGS_KEY]) {
-      settings = Object.assign({ overlay: true }, changes[SETTINGS_KEY].newValue || {});
+      settings = Object.assign({}, DEFAULT_SETTINGS, changes[SETTINGS_KEY].newValue || {});
       renderOverlay(true);
+      renderTimer();
     }
   });
 
@@ -442,6 +447,8 @@
     const code = findActiveCode();
     if (code && code !== currentCode) {
       currentCode = code;
+      if (!questionStart.has(code)) questionStart.set(code, Date.now());
+      hideWait();
       draft = { code, question: '', answer: null };
       pendingId = null;
       resultSeen = false;
@@ -474,7 +481,17 @@
     const btn = t.closest('button, a, [role="button"], [role="radio"], [role="checkbox"], [role="option"], label, li, ' + SEL.card);
     if (!btn) return;
     const txt = visibleText(btn);
-    if (SUBMIT_RE.test(txt)) { onSubmitClicked(); return; }
+    if (SUBMIT_RE.test(txt)) {
+      if (submitLocked()) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        pendingSubmitBtn = btn;
+        showWait();
+        return;
+      }
+      onSubmitClicked();
+      return;
+    }
     if (!txt || UI_BUTTON_RE.test(txt) || CODE_RE.test(txt)) return;
     // Only cards inside the question count; navigation links and the tab strip do not.
     if (btn.matches('a[href]') || btn.closest(SEL.activeTab) || btn.closest('[class*="_TaskItemLink_"]')) return;
@@ -700,6 +717,101 @@
     return true;
   }
 
+  // ------------------------------------------------------------ wait timer
+  function secondsLeft() {
+    if (!settings.timerEnabled || !currentCode) return 0;
+    const start = questionStart.get(currentCode);
+    if (!start) return 0;
+    const total = Math.max(0, Number(settings.timerSeconds) || 0);
+    return Math.max(0, Math.ceil(total - (Date.now() - start) / 1000));
+  }
+  function submitLocked() {
+    return !!currentCode && !vetoed.has(currentCode) && secondsLeft() > 0;
+  }
+  function fmt(sec) {
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  }
+
+  let timerEl = null;
+  function renderTimer() {
+    if (!IS_TOP) return;
+    const show = settings.timerEnabled && currentCode && questionStart.has(currentCode) &&
+                 !document.getElementById('sparxlog-banner');
+    if (!show) { if (timerEl) { timerEl.remove(); timerEl = null; } return; }
+    if (!timerEl || !timerEl.isConnected) {
+      timerEl = document.createElement('div');
+      timerEl.id = 'sparxlog-timer';
+      timerEl.setAttribute('data-sparxlog', '1');
+      timerEl.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:2147483646;' +
+        'padding:6px 14px;border-radius:999px;font:600 15px/1.2 system-ui,sans-serif;color:#fff;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none;letter-spacing:.5px';
+      document.documentElement.appendChild(timerEl);
+    }
+    const left = secondsLeft();
+    const veto = vetoed.has(currentCode);
+    const text = veto ? `${currentCode} · vetoed` : left > 0 ? `${currentCode} · wait ${fmt(left)}` : `${currentCode} · ready`;
+    if (timerEl.textContent !== text) timerEl.textContent = text;
+    timerEl.style.background = veto ? '#6b7280' : left > 0 ? '#dc2626' : '#16a34a';
+  }
+
+  let waitEl = null;
+  function showWait() {
+    if (!IS_TOP) return;
+    if (!waitEl || !waitEl.isConnected) {
+      waitEl = document.createElement('div');
+      waitEl.id = 'sparxlog-wait';
+      waitEl.setAttribute('data-sparxlog', '1');
+      waitEl.style.cssText = 'position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:2147483647;' +
+        'min-width:320px;max-width:80vw;padding:14px 18px;border-radius:12px;background:#fff7ed;color:#7c2d12;' +
+        'border:2px solid #f97316;font:15px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25)';
+      const msg = document.createElement('div');
+      msg.id = 'sparxlog-wait-msg';
+      msg.style.cssText = 'font-weight:600;margin-bottom:10px';
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+      const ok = document.createElement('button');
+      ok.textContent = 'OK, I\'ll wait';
+      ok.style.cssText = 'all:unset;cursor:pointer;padding:6px 12px;border-radius:6px;background:#2f6fe4;color:#fff;font:600 14px system-ui,sans-serif';
+      ok.addEventListener('click', hideWait);
+      const veto = document.createElement('button');
+      veto.textContent = 'Veto - submit anyway';
+      veto.style.cssText = 'all:unset;cursor:pointer;padding:6px 12px;border-radius:6px;background:#fff;color:#7c2d12;' +
+        'border:1px solid #f97316;font:600 14px system-ui,sans-serif';
+      veto.addEventListener('click', () => {
+        const btn = pendingSubmitBtn;
+        if (currentCode) vetoed.add(currentCode);
+        hideWait();
+        renderTimer();
+        if (btn && btn.isConnected) btn.click();   // goes through the click handler again, now unlocked
+      });
+      row.append(ok, veto);
+      waitEl.append(msg, row);
+      document.documentElement.appendChild(waitEl);
+    }
+    const total = Math.max(0, Number(settings.timerSeconds) || 0);
+    const totalText = total === 60 ? 'one minute' : fmt(total);
+    waitEl.querySelector('#sparxlog-wait-msg').textContent =
+      `Hold up - wait ${totalText} in total before submitting (${fmt(secondsLeft())} left).`;
+  }
+  function hideWait() {
+    if (waitEl) { waitEl.remove(); waitEl = null; }
+    pendingSubmitBtn = null;
+  }
+
+  // Enter can also submit; block it the same way while locked.
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Enter' || !submitLocked()) return;
+    if (ev.target instanceof Element && ev.target.closest('[data-sparxlog]')) return;
+    if (document.getElementById('sparxlog-banner')) return;   // bookwork check open
+    const submit = [...document.querySelectorAll('button')]
+      .find(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true' && isVisible(b) && SUBMIT_RE.test(visibleText(b)));
+    if (!submit) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    pendingSubmitBtn = submit;
+    showWait();
+  }, true);
+
   // ---------------------------------------------------------------- overlay
   let overlayEl = null;
   function renderOverlay(force) {
@@ -788,6 +900,10 @@
       if (!document.body) return;
       if (!tickBookwork()) tickQuestion();
       renderOverlay(false);
+      renderTimer();
+      if (waitEl && waitEl.isConnected) {
+        if (!submitLocked()) hideWait(); else showWait();
+      }
     } catch (e) {
       // Never let a heuristic failure break the page.
       console.debug('[sparx-logger]', e);
