@@ -35,7 +35,7 @@
 
   // Elements whose text must never be read: KaTeX keeps an invisible MathML
   // copy of every formula (would double every number) and our own overlay.
-  const SKIP_SEL = '.katex-mathml, script, style, noscript, [data-sparxlog]';
+  const SKIP_SEL = '.katex-mathml, script, style, noscript, [data-sparxlog], [class*="_EmptySlotContent_"]';
 
   // Sparx-specific hooks, taken from the real page markup. Class names carry a
   // hashed suffix (e.g. _Selected_1t8sa_85) so they are matched by prefix.
@@ -80,17 +80,54 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
-  /** Visible text of a subtree (skips KaTeX MathML duplicates, includes input values). */
+  /**
+   * Turn KaTeX's TeX source into readable text: "{\\frac{1}{3}}" -> "1/3",
+   * "{\\leq n \\lt}" -> "≤ n <".  Reading the TeX is more reliable than the
+   * rendered HTML, whose DOM order puts a fraction's denominator first.
+   */
+  function texToText(tex) {
+    let t = tex;
+    for (let i = 0; i < 6 && /\\[dt]?frac/.test(t); i++) {
+      t = t.replace(/(\d)\s*\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1 $2/$3')   // mixed number: 2 3/4
+           .replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1/$2');
+    }
+    t = t.replace(/\\text(?:rm|bf|it|sf|tt)?\{([^{}]*)\}/g, '$1')
+      .replace(/\\math(?:rm|bf|it|cal|bb)\{([^{}]*)\}/g, '$1')
+      .replace(/\\sqrt\[([^\]]*)\]\{([^{}]*)\}/g, '$1√$2')
+      .replace(/\\sqrt\{([^{}]*)\}/g, '√$1')
+      .replace(/\\left|\\right|\\displaystyle/g, '')
+      .replace(/\\(?:leq|le|leqslant)\b/g, '≤').replace(/\\(?:geq|ge|geqslant)\b/g, '≥')
+      .replace(/\\lt\b/g, '<').replace(/\\gt\b/g, '>').replace(/\\neq?\b/g, '≠')
+      .replace(/\\times\b/g, '×').replace(/\\div\b/g, '÷').replace(/\\pm\b/g, '±').replace(/\\cdot\b/g, '·')
+      .replace(/\\pi\b/g, 'π').replace(/\\infty\b/g, '∞').replace(/\\degree\b|\^\{?\\circ\}?/g, '°')
+      .replace(/\\%/g, '%').replace(/\\\$/g, '$').replace(/\\pounds\b/g, '£')
+      .replace(/\\(?:,|;|:|!|quad|qquad| \s)/g, ' ')
+      .replace(/\\[a-zA-Z]+/g, m => m.slice(1))
+      .replace(/[{}]/g, '')
+      .replace(/\s+/g, ' ').trim();
+    return t;
+  }
+
+  function katexText(el) {
+    const ann = el.querySelector('annotation[encoding="application/x-tex"]');
+    if (ann && ann.textContent.trim()) return texToText(ann.textContent);
+    const html = el.querySelector('.katex-html');
+    return (html ? html.textContent : el.textContent).replace(/\s+/g, ' ').trim();
+  }
+
+  /** Visible text of a subtree (KaTeX read from its TeX source, includes input values). */
   function visibleText(root) {
     if (!root) return '';
     if (root.nodeType === Node.TEXT_NODE) return root.textContent.replace(/\s+/g, ' ').trim();
     if (root.matches && root.matches(SKIP_SEL)) return '';
+    if (root.classList && root.classList.contains('katex')) return katexText(root);
     const parts = [];
     if (root.tagName === 'INPUT' || root.tagName === 'TEXTAREA') parts.push(root.value || '');
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         if (n.nodeType === Node.ELEMENT_NODE) {
           if (n.matches(SKIP_SEL)) return NodeFilter.FILTER_REJECT;
+          if (n.classList.contains('katex')) { parts.push(katexText(n)); return NodeFilter.FILTER_REJECT; }
           return (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA')
             ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
         }
@@ -159,11 +196,12 @@
   /** Numbers in a string, as strings. Handles unicode minus and "1,000". */
   function numberTokens(s) {
     s = (s || '').replace(/[−–]/g, '-').replace(/(\d),(?=\d{3}\b)/g, '$1');
-    return s.match(/-?\d+(?:\.\d+)?/g) || [];
+    return s.match(/-?\d+(?:\.\d+)?(?:\/\d+)?/g) || [];
   }
   function sameNumbers(a, b) {
     if (a.length !== b.length || !a.length) return false;
-    return a.every((x, i) => parseFloat(x) === parseFloat(b[i]));
+    const val = x => { const f = x.split('/'); return f.length === 2 ? parseFloat(f[0]) / parseFloat(f[1]) : parseFloat(x); };
+    return a.every((x, i) => Math.abs(val(x) - val(b[i])) < 1e-9);
   }
   function normText(s) {
     return (s || '').toLowerCase().replace(/[−–]/g, '-').replace(/[\s,|]+/g, '');
