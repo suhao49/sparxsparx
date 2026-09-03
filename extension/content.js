@@ -48,7 +48,14 @@
     card: '[data-scale-target="card-content"], [class*="_CardContent_"]',
     // Pickers that fill a slot inside the answer row: their selected card is
     // already reflected in the answer row, so it must not be counted twice.
-    picker: '[data-slot-options], [class*="_SlotsBelow_"], [class*="_InlineSlotOptions_"]'
+    picker: '[data-slot-options], [class*="_SlotsBelow_"], [class*="_InlineSlotOptions_"]',
+    // Bookwork check dialog
+    dialog: '[role="dialog"]',
+    bookworkChip: '[class*="_Bookwork_"]',
+    gridOption: '[class*="_GridOption_"]',
+    gridItem: '[class*="_Item_"]',
+    optionAnswer: '.answer, [class*="_Answer_"]',
+    answerBlock: '.answer-block, [class*="_AnswerBlock_"]'
   };
 
   const STORAGE_KEY = 'sparxLog';
@@ -159,7 +166,7 @@
     return a.every((x, i) => parseFloat(x) === parseFloat(b[i]));
   }
   function normText(s) {
-    return (s || '').toLowerCase().replace(/[−–]/g, '-').replace(/[\s,]+/g, '');
+    return (s || '').toLowerCase().replace(/[−–]/g, '-').replace(/[\s,|]+/g, '');
   }
 
   // ---------------------------------------------------------------- storage
@@ -283,10 +290,16 @@
   function captureAnswer(panel) {
     const values = [];
     const blocks = [...panel.querySelectorAll(SEL.answerContent)].filter(b => !b.closest(SKIP_SEL) && isVisible(b));
+    const parts = [];
     for (const b of blocks) {
       if (blocks.some(other => other !== b && other.contains(b))) continue; // nested: keep outer
       const t = visibleText(b);
       if (t) values.push(t);
+      b.querySelectorAll('input, textarea, [data-slot] ' + SEL.card.split(', ').join(', [data-slot] ')).forEach(f => {
+        if (f.closest(SKIP_SEL) || !isVisible(f)) return;
+        const v = (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') ? String(f.value || '') : visibleText(f);
+        if (v.trim()) parts.push(v.trim());
+      });
     }
 
     if (!values.length) {
@@ -321,7 +334,7 @@
     if (!values.length && !choices.length && lastClickedChoice) choices.push(lastClickedChoice);
 
     const all = values.length && choices.length ? [...values, ...choices] : (values.length ? values : choices);
-    return { values, choices, text: all.join(' | ') };
+    return { values, choices, parts: parts.concat(choices), text: all.join(' | ') };
   }
 
   function detectResult() {
@@ -409,11 +422,16 @@
     const txt = visibleText(btn);
     if (SUBMIT_RE.test(txt)) { onSubmitClicked(); return; }
     if (!txt || UI_BUTTON_RE.test(txt) || CODE_RE.test(txt)) return;
+    // Only cards inside the question count; navigation links and the tab strip do not.
+    if (btn.matches('a[href]') || btn.closest(SEL.activeTab) || btn.closest('[class*="_TaskItemLink_"]')) return;
+    if (!btn.closest(SEL.panel)) return;
     if (txt.length <= 120 && draft) lastClickedChoice = txt;
   }, true);
 
   // ---------------------------------------------------------- bookwork mode
   function findModal(heading) {
+    const dialog = heading.closest(SEL.dialog);
+    if (dialog) return dialog;
     let e = heading;
     while (e && e !== document.body) {
       if (findLeaves(ZOOM_RE, e).length >= 2 || findLeaves(/^\s*Submit\s*$/i, e).length) return e;
@@ -423,6 +441,10 @@
   }
 
   function findBookworkCode(modal) {
+    for (const chip of modal.querySelectorAll(SEL.bookworkChip)) {
+      const m = visibleText(chip).match(BOOKWORK_CODE_RE);
+      if (m) return m[1];
+    }
     const leaf = findLeaves(BOOKWORK_CODE_RE, modal)[0];
     if (leaf) return leaf.textContent.match(BOOKWORK_CODE_RE)[1];
     for (const el of modal.querySelectorAll('button, a, span, div, p, h1, h2, h3, h4')) {
@@ -438,6 +460,19 @@
    * content - that wrapper is the option card.
    */
   function findOptions(modal) {
+    // Sparx markup: each option is a _GridOption_ holding an _Item_ (outlined)
+    // with an .answer whose values sit in .answer-block spans.
+    const grid = [...modal.querySelectorAll(SEL.gridOption)].filter(isVisible);
+    if (grid.length) {
+      const opts = grid.map(g => {
+        const el = g.querySelector(SEL.gridItem) || g;
+        const ans = g.querySelector(SEL.optionAnswer) || g.querySelector('[role="radio"]') || el;
+        const blocks = [...g.querySelectorAll(SEL.answerBlock)].map(visibleText).filter(Boolean);
+        return { el, text: visibleText(ans).replace(/\bZoom\b/gi, '').trim(), blocks };
+      }).filter(o => o.text);
+      if (opts.length) return opts;
+    }
+
     const zooms = findLeaves(ZOOM_RE, modal);
     const options = [];
     const seen = new Set();
@@ -468,7 +503,7 @@
       if (seen.has(el)) return;
       seen.add(el);
       text = text || visibleText(el).replace(/\bZoom\b/gi, '').trim();
-      if (text) options.push({ el, text });
+      if (text) options.push({ el, text, blocks: [] });
     }
   }
 
@@ -489,8 +524,9 @@
    * Score how well each option matches an entry.
    *   3   exact text match (whitespace/case-insensitive), e.g. "18.15 ≤ f < 18.25"
    *   2.5 same numbers in the same order (symbols may differ)
-   *   2   every answer part appears in the option text
-   *   1   partial (some numbers / some text) - shown in amber only
+   *   2   every answer part appears in the option text (amber)
+   *   1   partial (some numbers / some text) - amber
+   * Green needs a single option scoring 2.5 or more.
    */
   function matchOptions(entry, options) {
     const strs = answerStrings(entry);
@@ -498,12 +534,15 @@
     const ansTokens = numberTokens(strs.join(' '));
     const ansNorm = strs.map(normText).filter(Boolean);
     const full = normText(strs.join(' '));
+    const parts = ((entry.answer && entry.answer.parts) || []).map(normText).filter(Boolean);
     let best = null;
     for (const o of options) {
       const oTokens = numberTokens(o.text);
       const oNorm = normText(o.text);
+      const blocks = (o.blocks || []).map(normText).filter(Boolean);
       let score = 0;
       if (full && oNorm === full) score = 3;
+      else if (parts.length && blocks.length && parts.join('\u0001') === blocks.join('\u0001')) score = 3;
       else if (ansTokens.length && sameNumbers(ansTokens, oTokens)) score = 2.5;
       else if (ansNorm.length && ansNorm.every(s => oNorm.includes(s))) score = 2;
       else if (ansTokens.length && oTokens.length && ansTokens.every(t => oTokens.some(x => parseFloat(x) === parseFloat(t)))) score = 1;
@@ -588,7 +627,7 @@
     if (highlighted.some(el => !wanted.includes(el)) || wanted.some(el => !highlighted.includes(el))) {
       clearHighlights();
     }
-    const confident = !!best && best.score >= 2 && best.ties.length === 1;
+    const confident = !!best && best.score >= 2.5 && best.ties.length === 1;
     const colour = confident ? '#16a34a' : '#f59e0b';
     for (const el of wanted) highlight(el, colour);
 
