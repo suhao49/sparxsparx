@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "name": "Sparx Bookwork Logger",
+  "version": "0.1.0",
+  "description": "Logs every Sparx Maths question code and the answer you submit, then highlights the matching option in the Bookwork check.",
+  "icons": { "48": "icon.svg", "96": "icon.svg" },
+  "permissions": [
+    "storage",
+    "downloads",
+    "clipboardWrite",
+    "activeTab",
+    "*://*.sparxmaths.uk/*",
+    "*://*.sparxmaths.com/*",
+    "*://*.sparx-learning.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.sparxmaths.uk/*",
+        "*://*.sparxmaths.com/*",
+        "*://*.sparx-learning.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Sparx Bookwork Logger",
+    "default_icon": "icon.svg"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "sparx-bookwork-logger@suhao49.github.io",
+      "strict_min_version": "109.0"
+    }
+  }
+}

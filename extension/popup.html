@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sparx Bookwork Logger</title>
+  <style>
+    body { margin: 0; min-width: 560px; max-width: 760px; font: 13px/1.4 system-ui, sans-serif; color: #1e293b; background: #f8fafc; }
+    header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #2f6fe4; color: #fff; }
+    header h1 { font-size: 15px; margin: 0; flex: 1; }
+    .bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+    button { cursor: pointer; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 5px 10px; font: inherit; }
+    button:hover { background: #f1f5f9; }
+    button.danger { color: #b91c1c; border-color: #fca5a5; }
+    label.toggle { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    #state { padding: 6px 12px; color: #475569; background: #fff; border-bottom: 1px solid #e2e8f0; white-space: pre-wrap; }
+    #msg { padding: 0 12px; color: #15803d; min-height: 18px; }
+    .wrap { max-height: 420px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    th { position: sticky; top: 0; background: #f1f5f9; font-weight: 600; }
+    td.code { font-weight: 700; white-space: nowrap; }
+    td.ans { font-family: ui-monospace, monospace; }
+    td.q { color: #64748b; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.q:hover { white-space: normal; }
+    .correct { color: #15803d; font-weight: 600; }
+    .incorrect { color: #b91c1c; font-weight: 600; }
+    .submitted { color: #b45309; }
+    .empty { padding: 24px; text-align: center; color: #64748b; }
+    small { color: #64748b; }
+  </style>
+</head>
+<body>
+  <header><h1>Sparx Bookwork Logger</h1><small id="count"></small></header>
+  <div class="bar">
+    <button id="export">Export log (JSON)</button>
+    <button id="copyHtml" title="Copy the current Sparx page's HTML for debugging">Copy page HTML</button>
+    <button id="saveHtml" title="Save the current Sparx page's HTML to a file for debugging">Save page HTML</button>
+    <button id="clear" class="danger">Clear log</button>
+    <label class="toggle"><input type="checkbox" id="overlay"> Show status bar on page</label>
+  </div>
+  <div id="state"></div>
+  <div id="msg"></div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>When</th><th>Code</th><th>Answer</th><th>Result</th><th>Question</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden>Nothing logged yet. Open a Sparx Maths question and answer it - the code and answer are saved when Sparx shows "Correct!".</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
