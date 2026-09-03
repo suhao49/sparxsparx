@@ -37,6 +37,20 @@
   // copy of every formula (would double every number) and our own overlay.
   const SKIP_SEL = '.katex-mathml, script, style, noscript, [data-sparxlog]';
 
+  // Sparx-specific hooks, taken from the real page markup. Class names carry a
+  // hashed suffix (e.g. _Selected_1t8sa_85) so they are matched by prefix.
+  const SEL = {
+    activeTab: '[class*="_TaskItemLink_"][class*="_Selected_"]',
+    panel: '[class*="_QuestionContainer_"], [class*="_Activity_"]',
+    answerContent: '[data-stack="answer-content"]',
+    selectedCard: '[class*="_CardContentSelected_"], [class*="_Selected_"], [class*="selected" i], ' +
+                  '[class*="chosen" i], [aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]',
+    card: '[data-scale-target="card-content"], [class*="_CardContent_"]',
+    // Pickers that fill a slot inside the answer row: their selected card is
+    // already reflected in the answer row, so it must not be counted twice.
+    picker: '[data-slot-options], [class*="_SlotsBelow_"], [class*="_InlineSlotOptions_"]'
+  };
+
   const STORAGE_KEY = 'sparxLog';
   const SETTINGS_KEY = 'sparxSettings';
   const MAX_ENTRIES = 3000;
@@ -182,6 +196,10 @@
    * lightest text.
    */
   function findActiveCode() {
+    for (const tab of document.querySelectorAll(SEL.activeTab)) {
+      const m = visibleText(tab).match(CODE_RE);
+      if (m) return m[1];
+    }
     const leaves = findLeaves(CODE_RE).filter(el => {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0 && r.top < 250 && r.width < 200;
@@ -223,6 +241,13 @@
   /** The white card holding the question. */
   function findQuestionPanel() {
     const btn = findActionButton();
+    if (btn) {
+      const sparx = btn.closest(SEL.panel);
+      if (sparx) return sparx;
+    }
+    for (const el of document.querySelectorAll(SEL.panel)) {
+      if (isVisible(el)) return el;
+    }
     if (!btn) return null;
     let e = btn.parentElement;
     while (e && e !== document.body) {
@@ -243,37 +268,60 @@
     return t.slice(0, 600);
   }
 
-  /** Read everything the student has entered / selected in the panel. */
+  /**
+   * Read everything the student has entered / selected in the panel.
+   *
+   * Sparx puts the whole answer row in [data-stack="answer-content"]: typed
+   * numbers, symbol slots that were filled from a picker, fixed text like the
+   * variable name.  Reading that container in DOM order gives the answer as it
+   * will later appear in the bookwork check, e.g. "18.15 ≤ f < 18.25".
+   * Multi-part questions have several such containers.
+   *
+   * Choice questions ("select answer", "select answer(s)") mark the chosen
+   * card(s) with a *Selected* class; those texts are collected as choices.
+   */
   function captureAnswer(panel) {
     const values = [];
-    panel.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(f => {
-      if (f.closest(SKIP_SEL)) return;
-      const type = (f.getAttribute('type') || '').toLowerCase();
-      if (type === 'hidden' || type === 'button' || type === 'submit') return;
-      if (type === 'checkbox' || type === 'radio') {
-        if (f.checked) {
-          const lab = (f.id && panel.querySelector(`label[for="${f.id}"]`)) || f.closest('label');
-          values.push(lab ? visibleText(lab) : (f.value || 'checked'));
+    const blocks = [...panel.querySelectorAll(SEL.answerContent)].filter(b => !b.closest(SKIP_SEL) && isVisible(b));
+    for (const b of blocks) {
+      if (blocks.some(other => other !== b && other.contains(b))) continue; // nested: keep outer
+      const t = visibleText(b);
+      if (t) values.push(t);
+    }
+
+    if (!values.length) {
+      panel.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(f => {
+        if (f.closest(SKIP_SEL) || !isVisible(f)) return;
+        const type = (f.getAttribute('type') || '').toLowerCase();
+        if (type === 'hidden' || type === 'button' || type === 'submit') return;
+        if (type === 'checkbox' || type === 'radio') {
+          if (f.checked) {
+            const lab = (f.id && panel.querySelector(`label[for="${f.id}"]`)) || f.closest('label');
+            values.push(lab ? visibleText(lab) : (f.value || 'checked'));
+          }
+          return;
         }
-        return;
-      }
-      const v = (f.value !== undefined && f.value !== null ? String(f.value) : visibleText(f)).trim();
-      if (v) values.push(v);
-    });
+        const v = (f.value !== undefined && f.value !== null ? String(f.value) : visibleText(f)).trim();
+        if (v) values.push(v);
+      });
+    }
 
     const choices = [];
-    panel.querySelectorAll(
-      '[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"], ' +
-      '[class*="selected" i], [class*="chosen" i], [class*="checked" i]'
-    ).forEach(c => {
+    const answerBlocks = [...panel.querySelectorAll(SEL.answerContent)];
+    panel.querySelectorAll(SEL.selectedCard).forEach(c => {
       if (c.closest(SKIP_SEL)) return;
+      if (!isVisible(c)) return;
+      if (c.matches(SEL.activeTab) || c.closest(SEL.activeTab)) return;      // tab strip
+      if (c.closest(SEL.picker)) return;                                    // slot picker
+      if (answerBlocks.some(b => b.contains(c))) return;                    // already in values
       const t = visibleText(c);
       if (t && t.length <= 200 && !choices.includes(t)) choices.push(t);
     });
-    if (lastClickedChoice && !choices.includes(lastClickedChoice) && !values.includes(lastClickedChoice)) {
-      choices.push(lastClickedChoice);
-    }
-    return { values, choices, text: (values.length ? values : choices).join(' | ') };
+    // Only fall back to the last clicked card when nothing is marked selected.
+    if (!values.length && !choices.length && lastClickedChoice) choices.push(lastClickedChoice);
+
+    const all = values.length && choices.length ? [...values, ...choices] : (values.length ? values : choices);
+    return { values, choices, text: all.join(' | ') };
   }
 
   function detectResult() {
@@ -356,7 +404,7 @@
   document.addEventListener('click', ev => {
     const t = ev.target instanceof Element ? ev.target : null;
     if (!t || t.closest('[data-sparxlog]') || t.closest('input, textarea')) return;
-    const btn = t.closest('button, a, [role="button"], [role="radio"], [role="checkbox"], [role="option"], label, li');
+    const btn = t.closest('button, a, [role="button"], [role="radio"], [role="checkbox"], [role="option"], label, li, ' + SEL.card);
     if (!btn) return;
     const txt = visibleText(btn);
     if (SUBMIT_RE.test(txt)) { onSubmitClicked(); return; }
@@ -433,30 +481,33 @@
 
   function answerStrings(entry) {
     const a = entry.answer || {};
-    const strs = [...(a.values || [])];
-    if (!strs.length) strs.push(...(a.choices || []));
+    const strs = [...(a.values || []), ...(a.choices || [])];
     return strs.filter(Boolean);
   }
 
-  /** Score how well each option matches an entry. 3 = exact numbers, 2 = exact text, 1 = partial. */
+  /**
+   * Score how well each option matches an entry.
+   *   3   exact text match (whitespace/case-insensitive), e.g. "18.15 ≤ f < 18.25"
+   *   2.5 same numbers in the same order (symbols may differ)
+   *   2   every answer part appears in the option text
+   *   1   partial (some numbers / some text) - shown in amber only
+   */
   function matchOptions(entry, options) {
     const strs = answerStrings(entry);
     if (!strs.length) return null;
     const ansTokens = numberTokens(strs.join(' '));
     const ansNorm = strs.map(normText).filter(Boolean);
+    const full = normText(strs.join(' '));
     let best = null;
     for (const o of options) {
       const oTokens = numberTokens(o.text);
       const oNorm = normText(o.text);
       let score = 0;
-      if (ansTokens.length) {
-        if (sameNumbers(ansTokens, oTokens)) score = 3;
-        else if (oTokens.length && ansTokens.every(t => oTokens.some(x => parseFloat(x) === parseFloat(t)))) score = 1;
-      } else if (ansNorm.length) {
-        if (ansNorm.join('') === oNorm) score = 3;
-        else if (ansNorm.every(s => oNorm.includes(s))) score = 2;
-        else if (ansNorm.some(s => s.length >= 3 && oNorm.includes(s))) score = 1;
-      }
+      if (full && oNorm === full) score = 3;
+      else if (ansTokens.length && sameNumbers(ansTokens, oTokens)) score = 2.5;
+      else if (ansNorm.length && ansNorm.every(s => oNorm.includes(s))) score = 2;
+      else if (ansTokens.length && oTokens.length && ansTokens.every(t => oTokens.some(x => parseFloat(x) === parseFloat(t)))) score = 1;
+      else if (ansNorm.some(s => s.length >= 3 && oNorm.includes(s))) score = 1;
       if (!score) continue;
       if (!best || score > best.score) best = { score, ties: [o] };
       else if (score === best.score) best.ties.push(o);
@@ -537,7 +588,8 @@
     if (highlighted.some(el => !wanted.includes(el)) || wanted.some(el => !highlighted.includes(el))) {
       clearHighlights();
     }
-    const colour = best && best.score >= 2 ? '#16a34a' : '#f59e0b';
+    const confident = !!best && best.score >= 2 && best.ties.length === 1;
+    const colour = confident ? '#16a34a' : '#f59e0b';
     for (const el of wanted) highlight(el, colour);
 
     if (!code) {
@@ -546,10 +598,11 @@
       showBanner(`Sparx Logger: no logged answer for ${code}.`, '#dc2626');
     } else {
       const e = bestEntry || entries[0];
-      const status = best ? (best.score >= 2 ? 'match highlighted in green' : 'possible match in amber')
+      const status = best ? (confident ? 'match highlighted in green'
+                                       : `${best.ties.length} possible match${best.ties.length > 1 ? 'es' : ''} in amber`)
                           : 'no option matched - compare by eye';
       showBanner(`Sparx Logger - Bookwork ${code}\nYour answer: ${e.answer.text}   (${e.result}, ${ago(e.ts)})\n${status}`,
-                 best ? (best.score >= 2 ? '#15803d' : '#b45309') : '#dc2626');
+                 best ? (confident ? '#15803d' : '#b45309') : '#dc2626');
     }
     return true;
   }

@@ -42,10 +42,24 @@ Everything is stored locally in the browser (`browser.storage.local`); nothing
 is sent anywhere. The toolbar popup shows the log, lets you export it as JSON,
 delete entries or clear it, and toggles the on-page status bar.
 
+## How answers are read
+
+Sparx renders the whole answer row inside a `data-stack="answer-content"`
+container: typed numbers, symbol slots filled from a picker, and fixed text such
+as the variable name. The extension reads that container in order, so an
+inequality question is logged as `18.15 ≤ f < 18.25`, exactly as it later
+appears in the bookwork check. Multi-part answers are joined with ` | `.
+
+For "select answer" / "select answer(s)" questions the chosen card(s) carry a
+`_CardContentSelected_` class; their texts are logged as the answer
+(e.g. `7 | 13`). The active question tab is the link with a `_Selected_` class.
+Class names have hashed suffixes, so they are matched by prefix, with the older
+text/colour heuristics kept as fallbacks.
+
 ## When something is not detected
 
-The Sparx page layout is not documented, so the extension finds things by their
-text and colour rather than by fixed element names. If it shows
+If a screen is not recognised by the selectors above, the extension falls back
+to finding things by text and colour. If it shows
 `no question detected`, captures no answer, or fails to highlight an option:
 
 1. Open the toolbar popup (or the on-page status bar) and click
