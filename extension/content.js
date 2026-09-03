@@ -5,7 +5,7 @@
  *
  *  1. QUESTION MODE - work out which question is open (the dark tab at the
  *     top, e.g. "1A"), read whatever you type into the answer boxes, and when
- *     Sparx says "Correct!" (or "Incorrect") save a log entry:
+ *     Sparx says "Correct!" save a log entry (wrong answers are discarded):
  *        { code: "1A", answer: "9.725 | 9.735", result: "correct", ... }
  *
  *  2. BOOKWORK MODE - when the "Bookwork check" box appears, read the code it
@@ -376,6 +376,15 @@
   }
 
   function detectResult() {
+    // Sparx: <div id="RESULT_POPOVER" class="_ResultFullWidth_... _Incorrect_...">
+    const pop = document.getElementById('RESULT_POPOVER');
+    if (pop && isVisible(pop)) {
+      if (/_Incorrect_/.test(pop.className)) return 'incorrect';
+      if (/_Correct_/.test(pop.className)) return 'correct';
+      const msg = pop.querySelector('[class*="_ResultMessage_"]');
+      if (msg && INCORRECT_RE.test(visibleText(msg))) return 'incorrect';
+      if (msg && CORRECT_RE.test(visibleText(msg))) return 'correct';
+    }
     if (findLeaves(CORRECT_RE).some(isVisible)) return 'correct';
     if (findLeaves(INCORRECT_RE).some(isVisible)) return 'incorrect';
     return null;
@@ -410,6 +419,13 @@
   function commitResult(result) {
     if (!draft) return;
     let entry = pendingId ? log.find(e => e.id === pendingId) : null;
+    if (result === 'incorrect') {
+      // Wrong answers are not kept: drop the entry created on "Submit answer".
+      if (entry) log = log.filter(e => e !== entry);
+      pendingId = null;
+      save();
+      return;
+    }
     if (!entry) {
       entry = makeEntry(result);
       log.push(entry);
@@ -547,7 +563,7 @@
 
   function entriesFor(code) {
     if (!code) return [];
-    const list = log.filter(e => e.code === code && e.answer && e.answer.text);
+    const list = log.filter(e => e.code === code && e.result !== 'incorrect' && e.answer && e.answer.text);
     const rank = r => (r === 'correct' ? 0 : r === 'submitted' ? 1 : 2);
     return list.sort((a, b) => rank(a.result) - rank(b.result) || b.ts - a.ts);
   }

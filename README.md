@@ -35,7 +35,8 @@ permanently either:
 |---|---|
 | Question (`1A`, `1B`, ...) | Detects the active code, reads the answer boxes while you type, remembers option clicks for multiple-choice questions. |
 | "Submit answer" clicked | Creates a log entry with result `submitted`. |
-| "Correct!" / "Incorrect" banner | Updates that entry's result. If no entry exists yet one is created. |
+| "Correct!" banner | Marks that entry `correct`. If no entry exists yet one is created. |
+| "Incorrect" banner | Deletes the entry, so wrong answers are never kept. |
 | Bookwork check | Reads the code from the blue `Bookwork 1C` button, finds the logged answer, outlines the matching option (green = exact match, amber = partial) and shows a banner at the top with the answer text so you can compare by eye if the highlight fails. |
 
 Everything is stored locally in the browser (`browser.storage.local`); nothing
