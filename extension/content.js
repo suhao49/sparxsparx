@@ -486,7 +486,7 @@
         ev.preventDefault();
         ev.stopImmediatePropagation();
         pendingSubmitBtn = btn;
-        showWait();
+        showWait('click');
         return;
       }
       onSubmitClicked();
@@ -755,8 +755,10 @@
   }
 
   let waitEl = null;
-  function showWait() {
+  let waitReason = 'click';
+  function showWait(reason) {
     if (!IS_TOP) return;
+    if (reason) waitReason = reason;
     if (!waitEl || !waitEl.isConnected) {
       waitEl = document.createElement('div');
       waitEl.id = 'sparxlog-wait';
@@ -790,8 +792,10 @@
     }
     const total = Math.max(0, Number(settings.timerSeconds) || 0);
     const totalText = total === 60 ? 'one minute' : fmt(total);
-    waitEl.querySelector('#sparxlog-wait-msg').textContent =
-      `Hold up - wait ${totalText} in total before submitting (${fmt(secondsLeft())} left).`;
+    const left = secondsLeft();
+    waitEl.querySelector('#sparxlog-wait-msg').textContent = waitReason === 'enter'
+      ? `You have ${left} second${left === 1 ? '' : 's'} left, go scroll.`
+      : `Hold up - wait ${totalText} in total before submitting (${fmt(left)} left).`;
   }
   function hideWait() {
     if (waitEl) { waitEl.remove(); waitEl = null; }
@@ -809,7 +813,7 @@
     ev.preventDefault();
     ev.stopImmediatePropagation();
     pendingSubmitBtn = submit;
-    showWait();
+    showWait('enter');
   }, true);
 
   // ---------------------------------------------------------------- overlay
