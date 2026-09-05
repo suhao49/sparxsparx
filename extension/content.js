@@ -229,6 +229,7 @@
   browser.storage.onChanged.addListener(changes => {
     if (changes[STORAGE_KEY] && !saveTimer) {
       log = Array.isArray(changes[STORAGE_KEY].newValue) ? changes[STORAGE_KEY].newValue : [];
+      if (dashEl && dashEl.isConnected) renderDashboard();
     }
     if (changes[SETTINGS_KEY]) {
       settings = Object.assign({}, DEFAULT_SETTINGS, changes[SETTINGS_KEY].newValue || {});
@@ -831,6 +832,8 @@
       const status = document.createElement('span');
       status.id = 'sparxlog-status';
       status.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      const dashBtn = mkBtn('Dashboard', 'Open the Sparx Logger dashboard: settings, logged answers, clear history');
+      dashBtn.addEventListener('click', () => toggleDashboard());
       const copyBtn = mkBtn('Copy HTML', 'Copy this page\'s HTML to the clipboard so it can be sent for debugging');
       copyBtn.addEventListener('click', () => copyDebugHtml(copyBtn));
       const hideBtn = mkBtn('×', 'Hide this bar (re-enable from the toolbar popup)');
@@ -839,7 +842,7 @@
         browser.storage.local.set({ [SETTINGS_KEY]: settings }).catch(() => {});
         renderOverlay(true);
       });
-      overlayEl.append(status, copyBtn, hideBtn);
+      overlayEl.append(status, dashBtn, copyBtn, hideBtn);
       document.documentElement.appendChild(overlayEl);
     }
     const st = overlayEl.querySelector('#sparxlog-status');
@@ -856,6 +859,139 @@
       b.title = title;
       b.style.cssText = 'all:unset;cursor:pointer;padding:3px 8px;border-radius:5px;background:#2f6fe4;color:#fff;font:12px system-ui,sans-serif';
       return b;
+    }
+  }
+
+  // -------------------------------------------------------------- dashboard
+  let dashEl = null;
+  function saveSettings(patch) {
+    settings = Object.assign({}, settings, patch);
+    browser.storage.local.set({ [SETTINGS_KEY]: settings }).catch(() => {});
+    renderOverlay(true);
+    renderTimer();
+  }
+  function clearHistory() {
+    log = [];
+    pendingId = null;
+    save();
+  }
+  function deleteEntry(id) {
+    log = log.filter(e => e.id !== id);
+    if (pendingId === id) pendingId = null;
+    save();
+  }
+  function toggleDashboard() {
+    if (dashEl && dashEl.isConnected) { dashEl.remove(); dashEl = null; return; }
+    renderDashboard();
+  }
+  function el(tag, style, text) {
+    const e = document.createElement(tag);
+    if (style) e.style.cssText = style;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function dashButton(label, colour, onClick) {
+    const b = el('button', 'all:unset;cursor:pointer;padding:7px 12px;border-radius:7px;font:600 13px system-ui,sans-serif;color:#fff;background:' + colour, label);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function renderDashboard() {
+    if (!IS_TOP) return;
+    if (dashEl) dashEl.remove();
+    dashEl = el('div', 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;font:14px/1.4 system-ui,sans-serif;color:#1e293b');
+    dashEl.id = 'sparxlog-dash';
+    dashEl.setAttribute('data-sparxlog', '1');
+    dashEl.addEventListener('click', ev => { if (ev.target === dashEl) toggleDashboard(); });
+    const panel = el('div', 'background:#f8fafc;width:min(820px,94vw);max-height:88vh;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden');
+
+    const head = el('div', 'display:flex;align-items:center;gap:10px;padding:12px 16px;background:#2f6fe4;color:#fff');
+    head.append(el('div', 'font:700 16px system-ui,sans-serif;flex:1', 'Sparx Logger dashboard'),
+                el('div', 'opacity:.85', `${log.length} answer${log.length === 1 ? '' : 's'} saved`));
+    const close = dashButton('×', 'rgba(255,255,255,.2)', toggleDashboard);
+    close.title = 'Close';
+    head.append(close);
+
+    // Options
+    const opts = el('div', 'padding:12px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:1fr 1fr;gap:10px 24px');
+    opts.append(el('div', 'grid-column:1/-1;font-weight:700;color:#334155', 'Options'));
+    opts.append(checkbox('Show status bar at the bottom of the page', settings.overlay, v => saveSettings({ overlay: v })));
+    opts.append(checkbox('Wait timer before submitting', settings.timerEnabled, v => saveSettings({ timerEnabled: v })));
+    const secRow = el('label', 'display:flex;align-items:center;gap:8px');
+    const sec = el('input', 'width:80px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit');
+    sec.type = 'number'; sec.min = '0'; sec.max = '3600'; sec.step = '5'; sec.value = settings.timerSeconds;
+    sec.addEventListener('change', () => {
+      const n = Math.max(0, Math.min(3600, parseInt(sec.value, 10) || 0));
+      sec.value = n;
+      saveSettings({ timerSeconds: n });
+    });
+    secRow.append(el('span', '', 'Wait time (seconds):'), sec);
+    opts.append(secRow);
+    const vetoRow = el('div', 'display:flex;align-items:center;gap:8px');
+    vetoRow.append(dashButton('Veto timer for this question', '#6b7280', () => {
+      if (currentCode) { vetoed.add(currentCode); renderTimer(); hideWait(); }
+      renderDashboard();
+    }), el('span', 'color:#64748b', currentCode ? `current question: ${currentCode}` : 'no question open'));
+    opts.append(vetoRow);
+
+    // Actions
+    const actions = el('div', 'padding:12px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:8px;align-items:center');
+    actions.append(el('div', 'font-weight:700;color:#334155;width:100%', 'Bookwork history'));
+    const clearBtn = dashButton('Clear bookwork history', '#dc2626', () => {
+      if (!log.length) return;
+      if (clearBtn.dataset.armed) {
+        clearHistory();
+        renderDashboard();
+        return;
+      }
+      clearBtn.dataset.armed = '1';
+      clearBtn.textContent = `Really delete ${log.length} answer${log.length === 1 ? '' : 's'}? Click again`;
+      setTimeout(() => { if (clearBtn.isConnected) { delete clearBtn.dataset.armed; clearBtn.textContent = 'Clear bookwork history'; } }, 4000);
+    });
+    const exportBtn = dashButton('Export JSON', '#2f6fe4', () => {
+      const blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' });
+      const a = el('a'); a.href = URL.createObjectURL(blob);
+      a.download = `sparx-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+      a.setAttribute('data-sparxlog', '1');
+      document.documentElement.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    });
+    const copyBtn = dashButton('Copy page HTML (debug)', '#475569', () => copyDebugHtml(copyBtn));
+    actions.append(clearBtn, exportBtn, copyBtn);
+
+    // Log table
+    const wrap = el('div', 'overflow:auto;flex:1;background:#fff');
+    if (!log.length) {
+      wrap.append(el('div', 'padding:28px;text-align:center;color:#64748b', 'Nothing saved yet. Answers are stored when Sparx says "Correct!".'));
+    } else {
+      const table = el('table', 'width:100%;border-collapse:collapse');
+      const thead = el('thead');
+      const hr = el('tr');
+      for (const h of ['When', 'Code', 'Answer', '']) hr.append(el('th', 'text-align:left;padding:6px 10px;background:#f1f5f9;position:sticky;top:0;font-weight:600;color:#334155', h));
+      thead.append(hr); table.append(thead);
+      const tbody = el('tbody');
+      for (const e of log.slice().sort((a, b) => b.ts - a.ts).slice(0, 300)) {
+        const tr = el('tr');
+        tr.append(el('td', 'padding:6px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap;color:#64748b', new Date(e.ts).toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })));
+        tr.append(el('td', 'padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:700', e.code || '?'));
+        tr.append(el('td', 'padding:6px 10px;border-bottom:1px solid #e2e8f0;font-family:ui-monospace,monospace', (e.answer && e.answer.text) || '(none captured)'));
+        const td = el('td', 'padding:6px 10px;border-bottom:1px solid #e2e8f0;text-align:right');
+        const del = dashButton('✕', '#94a3b8', () => { deleteEntry(e.id); renderDashboard(); });
+        del.title = 'Delete this entry';
+        td.append(del); tr.append(td); tbody.append(tr);
+      }
+      table.append(tbody); wrap.append(table);
+    }
+
+    panel.append(head, opts, actions, wrap);
+    dashEl.append(panel);
+    document.documentElement.appendChild(dashEl);
+
+    function checkbox(label, checked, onChange) {
+      const l = el('label', 'display:flex;align-items:center;gap:8px;cursor:pointer');
+      const c = el('input'); c.type = 'checkbox'; c.checked = !!checked;
+      c.addEventListener('change', () => onChange(c.checked));
+      l.append(c, el('span', '', label));
+      return l;
     }
   }
 
