@@ -18,7 +18,7 @@ Every push that changes `extension/` runs the [Build extension](.github/workflow
 workflow, which lints the add-on, zips it and publishes it to the rolling
 **latest** release. Stable download link:
 
-    https://github.com/suhao49/sparxsparx/releases/latest/download/sparx-bookwork-logger.xpi
+    https://github.com/suhao49/sparxsparx/releases/download/latest/sparx-bookwork-logger.xpi
 
 To build locally instead, run `./build.sh`.
 

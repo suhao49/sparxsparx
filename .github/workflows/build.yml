@@ -60,11 +60,11 @@ jobs:
             Automatic build of `extension/` from commit ${{ github.sha }} on `${{ github.ref_name }}`.
 
             **Download:** `sparx-bookwork-logger.xpi` below (stable link:
-            https://github.com/${{ github.repository }}/releases/latest/download/sparx-bookwork-logger.xpi).
+            https://github.com/${{ github.repository }}/releases/download/latest/sparx-bookwork-logger.xpi).
 
             Install for testing via `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on*.
             A `sparx-bookwork-logger-signed.xpi` is included only when AMO signing secrets are configured.
-          prerelease: true
+          prerelease: false
           files: |
             sparx-bookwork-logger.xpi
             sparx-bookwork-logger-${{ steps.meta.outputs.version }}.xpi
