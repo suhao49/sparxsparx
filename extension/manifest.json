@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Sparx Bookwork Logger",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Logs every Sparx Maths question code and the answer you submit, then highlights the matching option in the Bookwork check.",
   "icons": { "48": "icon.svg", "96": "icon.svg" },
   "permissions": [

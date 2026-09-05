@@ -12,6 +12,16 @@ question 1A  ->  you type 9.725 and 9.735  ->  Sparx says "Correct!"
 Bookwork check "Bookwork 1A"  ->  the card showing 9.725 <= n < 9.735 gets a green outline
 ```
 
+## Download
+
+Every push that changes `extension/` runs the [Build extension](.github/workflows/build.yml)
+workflow, which lints the add-on, zips it and publishes it to the rolling
+**latest** release. Stable download link:
+
+    https://github.com/suhao49/sparxsparx/releases/latest/download/sparx-bookwork-logger.xpi
+
+To build locally instead, run `./build.sh`.
+
 ## Install (temporary, for testing)
 
 1. Open Firefox and go to `about:debugging#/runtime/this-firefox`.
@@ -26,8 +36,11 @@ permanently either:
 - use **Firefox Developer Edition** or **Nightly**, set
   `xpinstall.signatures.required` to `false` in `about:config`, run
   `./build.sh` and open the produced `sparx-bookwork-logger.xpi` in Firefox; or
-- submit the `.xpi` to <https://addons.mozilla.org/developers/> for signing
-  (free, "unlisted" is fine) and install the signed file.
+- have the workflow sign it: create API credentials at
+  <https://addons.mozilla.org/developers/addon/api/key/> and add them as the
+  repository secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. The next build then
+  also publishes `sparx-bookwork-logger-signed.xpi`, which installs permanently
+  in normal Firefox.
 
 ## What it does
 
