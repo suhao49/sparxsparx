@@ -1,0 +1,72 @@
+name: Build extension
+
+on:
+  push:
+    paths:
+      - "extension/**"
+      - "build.sh"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from manifest
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./extension/manifest.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Lint extension (web-ext)
+        run: npx --yes web-ext lint --source-dir extension --warnings-as-errors=false
+
+      - name: Build .xpi
+        run: |
+          ./build.sh
+          cp sparx-bookwork-logger.xpi "sparx-bookwork-logger-${{ steps.meta.outputs.version }}.xpi"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparx-bookwork-logger-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.short_sha }}
+          path: sparx-bookwork-logger.xpi
+
+      # Optional: sign with Mozilla so the .xpi installs permanently in normal
+      # Firefox. Add AMO_JWT_ISSUER and AMO_JWT_SECRET as repository secrets
+      # (from https://addons.mozilla.org/developers/addon/api/key/) to enable.
+      - name: Sign with addons.mozilla.org
+        if: env.AMO_JWT_ISSUER != ''
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          npx --yes web-ext sign --source-dir extension --artifacts-dir signed \
+            --channel unlisted --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+          cp signed/*.xpi sparx-bookwork-logger-signed.xpi
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Sparx Bookwork Logger ${{ steps.meta.outputs.version }} (${{ steps.meta.outputs.short_sha }})
+          body: |
+            Automatic build of `extension/` from commit ${{ github.sha }} on `${{ github.ref_name }}`.
+
+            **Download:** `sparx-bookwork-logger.xpi` below (stable link:
+            https://github.com/${{ github.repository }}/releases/download/latest/sparx-bookwork-logger.xpi).
+
+            Install for testing via `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on*.
+            A `sparx-bookwork-logger-signed.xpi` is included only when AMO signing secrets are configured.
+          prerelease: false
+          files: |
+            sparx-bookwork-logger.xpi
+            sparx-bookwork-logger-${{ steps.meta.outputs.version }}.xpi
+            sparx-bookwork-logger-signed.xpi
+          fail_on_unmatched_files: false
